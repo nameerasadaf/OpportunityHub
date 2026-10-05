@@ -1,16 +1,88 @@
-# React + Vite
+🚀 OpportunityHub
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+«A simple and modern platform to discover, organize, and track internships, jobs, hackathons, and other career opportunities.»
 
-Currently, two official plugins are available:
+🌐 Live Demo
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+"Visit OpportunityHub →" (https://opportunityhub-orcin.vercel.app)
 
-## React Compiler
+📌 About the Project
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+OpportunityHub is a web application built to help students keep all their career opportunities in one place.
 
-## Expanding the ESLint configuration
+Instead of managing opportunities across multiple tabs, bookmarks, notes, and spreadsheets, users can add and organize opportunities and track their application progress from a single dashboard.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+✨ Features
+
+- 📊 Opportunity dashboard with application statistics
+- ➕ Add new opportunities
+- ✏️ Edit existing opportunities
+- 🗑️ Delete opportunities
+- 🔍 Search opportunities and companies
+- 🏷️ Filter opportunities by application status
+- 🔄 Track application progress
+- 💾 Automatically saves data using browser Local Storage
+- 📱 Responsive design for different screen sizes
+- 📋 Application pipeline with:
+  - Saved
+  - Interested
+  - Applied
+  - Interview
+  - Selected
+
+🛠️ Tech Stack
+
+- React
+- JavaScript
+- Vite
+- CSS
+- Git
+- GitHub
+- Vercel
+
+📂 Project Structure
+
+OpportunityHub/
+├── public/
+├── src/
+│   ├── assets/
+│   ├── App.jsx
+│   ├── App.css
+│   └── main.jsx
+├── index.html
+├── package.json
+├── vite.config.js
+└── README.md
+
+⚙️ Run Locally
+
+Clone the repository:
+
+git clone https://github.com/nameerasadaf/OpportunityHub.git
+
+Move into the project:
+
+cd OpportunityHub
+
+Install dependencies:
+
+npm install
+
+Start the development server:
+
+npm run dev
+
+🎯 Purpose
+
+This project was created as a practical project to learn and demonstrate frontend development, Git/GitHub workflow, deployment, and building a useful student-focused application.
+
+🔗 Links
+
+- Live Demo: https://opportunityhub-orcin.vercel.app
+- GitHub: https://github.com/nameerasadaf/OpportunityHub
+
+👩‍💻 Author
+
+Nameera Sadaf
+
+GitHub: https://github.com/nameerasadaf
