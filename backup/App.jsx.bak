@@ -1,0 +1,2202 @@
+import { useEffect, useRef, useState } from "react";
+
+import AIAssistant from "./AIAssistant.jsx";
+
+const STORAGE_KEY = "opportunityhub-data";
+
+const initialOpportunities = [
+  {
+    id: 1,
+    title: "Google Summer Internship",
+    company: "Google",
+    type: "Internship",
+    deadline: "2026-11-15",
+    status: "Interested",
+    color: "#4285F4",
+    url: "https://careers.google.com/students/",
+  },
+  {
+    id: 2,
+    title: "Smart India Hackathon",
+    company: "Smart India Hackathon",
+    type: "Hackathon",
+    deadline: "2026-10-20",
+    status: "Saved",
+    color: "#FF6B35",
+    url: "https://www.sih.gov.in/",
+  },
+  {
+    id: 3,
+    title: "Microsoft AI Internship",
+    company: "Microsoft",
+    type: "Internship",
+    deadline: "2026-11-28",
+    status: "Applied",
+    color: "#00A4EF",
+    url: "https://careers.microsoft.com/students",
+  },
+];
+
+const statuses = [
+  "Saved",
+  "Interested",
+  "Applied",
+  "Interview",
+  "Selected",
+];
+
+function getTypeColor(type) {
+  if (type === "Hackathon") return "#FF6B35";
+  if (type === "Internship") return "#4285F4";
+  if (type === "Job") return "#7C3AED";
+  if (type === "Scholarship") return "#0EA5E9";
+  if (type === "Competition") return "#059669";
+
+  return "#64748B";
+}
+
+function formatDate(dateString) {
+  if (!dateString) return "No deadline";
+
+  const date = new Date(`${dateString}T00:00:00`);
+
+  if (Number.isNaN(date.getTime())) {
+    return dateString;
+  }
+
+  return date.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function getDeadlineInfo(deadline) {
+  if (!deadline) {
+    return {
+      label: "No deadline",
+      className: "no-deadline",
+    };
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const deadlineDate = new Date(`${deadline}T00:00:00`);
+  deadlineDate.setHours(0, 0, 0, 0);
+
+  const difference =
+    deadlineDate.getTime() - today.getTime();
+
+  const daysLeft = Math.ceil(
+    difference / (1000 * 60 * 60 * 24)
+  );
+
+  if (daysLeft < 0) {
+    return {
+      label: `Overdue by ${Math.abs(daysLeft)} day${
+        Math.abs(daysLeft) === 1 ? "" : "s"
+      }`,
+      className: "overdue",
+    };
+  }
+
+  if (daysLeft === 0) {
+    return {
+      label: "Due today",
+      className: "due-today",
+    };
+  }
+
+  if (daysLeft <= 7) {
+    return {
+      label: `${daysLeft} day${
+        daysLeft === 1 ? "" : "s"
+      } left`,
+      className: "due-soon",
+    };
+  }
+
+  return {
+    label: `${daysLeft} days left`,
+    className: "upcoming",
+  };
+}
+
+function App() {
+  const [opportunities, setOpportunities] = useState(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+
+      if (saved) {
+        const parsed = JSON.parse(saved);
+
+        return parsed.map((item) => ({
+          ...item,
+          deadline:
+            item.deadline &&
+            item.deadline.includes("-")
+              ? item.deadline
+              : convertOldDate(item.deadline),
+        }));
+      }
+
+      return initialOpportunities;
+    } catch {
+      return initialOpportunities;
+    }
+  });
+
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("All");
+  const [showModal, setShowModal] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+
+  const [newOpportunity, setNewOpportunity] = useState({
+    title: "",
+    company: "",
+    type: "Internship",
+    deadline: "",
+    url: "",
+  });
+
+  // Discovery State
+  const [discoveredOpportunities, setDiscoveredOpportunities] = useState([]);
+  const [discoveryLoading, setDiscoveryLoading] = useState(true);
+  const [discoveryError, setDiscoveryError] = useState(null);
+  const [discoveryCategory, setDiscoveryCategory] = useState("All");
+  const [discoverySearch, setDiscoverySearch] = useState("");
+  const [sourcesInfo, setSourcesInfo] = useState([]);
+  const [unavailableSources, setUnavailableSources] = useState([]);
+  const [toastMessage, setToastMessage] = useState("");
+
+  const opportunitiesRef = useRef(null);
+  const searchRef = useRef(null);
+  const discoveryRef = useRef(null);
+
+  useEffect(() => {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(opportunities)
+    );
+  }, [opportunities]);
+
+  // Fetch live opportunities from real internet sources
+  async function fetchDiscoveredOpportunities(type = "all") {
+    setDiscoveryLoading(true);
+    setDiscoveryError(null);
+
+    try {
+      const queryParam = type === "all" ? "all" : type.toLowerCase();
+      const response = await fetch(`/api/opportunities?type=${queryParam}`);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Could not retrieve live opportunities.");
+      }
+
+      setDiscoveredOpportunities(data.opportunities || []);
+      setSourcesInfo(data.sources || []);
+      setUnavailableSources(data.unavailableSources || []);
+    } catch (err) {
+      console.error("Discovery error:", err);
+      setDiscoveryError(err.message || "Failed to connect to the opportunity discovery service.");
+    } finally {
+      setDiscoveryLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    let active = true;
+
+    fetch("/api/opportunities?type=all")
+      .then((res) => res.json())
+      .then((data) => {
+        if (!active) return;
+        setDiscoveredOpportunities(data.opportunities || []);
+        setSourcesInfo(data.sources || []);
+        setUnavailableSources(data.unavailableSources || []);
+      })
+      .catch((err) => {
+        if (!active) return;
+        setDiscoveryError(err.message || "Failed to connect to the opportunity discovery service.");
+      })
+      .finally(() => {
+        if (active) {
+          setDiscoveryLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  function showToast(msg) {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage("");
+    }, 3500);
+  }
+
+  function isTracked(item) {
+    return opportunities.some(
+      (opp) =>
+        (item.url && opp.url && opp.url === item.url) ||
+        (opp.title.toLowerCase() === item.title.toLowerCase() &&
+          opp.company.toLowerCase() === item.company.toLowerCase())
+    );
+  }
+
+  function getTrackedItem(item) {
+    return opportunities.find(
+      (opp) =>
+        (item.url && opp.url && opp.url === item.url) ||
+        (opp.title.toLowerCase() === item.title.toLowerCase() &&
+          opp.company.toLowerCase() === item.company.toLowerCase())
+    );
+  }
+
+  function saveToTracker(item) {
+    if (isTracked(item)) {
+      showToast(`"${item.title}" is already in your tracker!`);
+      return;
+    }
+
+    const uniqueId =
+      item.id ||
+      `tracked-${item.type}-${item.title}-${item.company}`
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "-");
+
+    const newTracked = {
+      id: uniqueId,
+      title: item.title,
+      company: item.company,
+      type: item.type || "Internship",
+      deadline: item.deadline || "",
+      deadlineLabel: item.deadlineLabel || "",
+      status: "Saved",
+      color: getTypeColor(item.type),
+      url: item.url || "",
+      location: item.location || "",
+      source: item.source || "",
+    };
+
+    setOpportunities((prev) => [newTracked, ...prev]);
+    showToast(`Saved "${item.title}" to your application tracker!`);
+  }
+
+  const totalOpportunities = opportunities.length;
+
+  const appliedCount = opportunities.filter(
+    (item) => item.status === "Applied"
+  ).length;
+
+  const interestedCount = opportunities.filter(
+    (item) => item.status === "Interested"
+  ).length;
+
+  const savedCount = opportunities.filter(
+    (item) => item.status === "Saved"
+  ).length;
+
+  const interviewCount = opportunities.filter(
+    (item) => item.status === "Interview"
+  ).length;
+
+  const selectedCount = opportunities.filter(
+    (item) => item.status === "Selected"
+  ).length;
+
+  const overdueCount = opportunities.filter(
+    (item) =>
+      getDeadlineInfo(item.deadline).className ===
+      "overdue"
+  ).length;
+
+  const dueSoonCount = opportunities.filter(
+    (item) => {
+      const className =
+        getDeadlineInfo(item.deadline).className;
+
+      return (
+        className === "due-soon" ||
+        className === "due-today"
+      );
+    }
+  ).length;
+
+  // Filtered tracked opportunities
+  const filteredOpportunities = opportunities
+    .filter((item) => {
+      const searchText = search.toLowerCase();
+
+      const matchesSearch =
+        item.title
+          .toLowerCase()
+          .includes(searchText) ||
+        item.company
+          .toLowerCase()
+          .includes(searchText);
+
+      const matchesFilter =
+        filter === "All" ||
+        item.status === filter;
+
+      return matchesSearch && matchesFilter;
+    })
+    .sort((a, b) => {
+      if (!a.deadline) return 1;
+      if (!b.deadline) return -1;
+
+      return (
+        new Date(a.deadline) -
+        new Date(b.deadline)
+      );
+    });
+
+  // Filtered live discovered opportunities
+  const filteredDiscovered = discoveredOpportunities.filter((item) => {
+    const matchesCategory =
+      discoveryCategory === "All" ||
+      item.type.toLowerCase() === discoveryCategory.toLowerCase();
+
+    const query = discoverySearch.toLowerCase().trim();
+    if (!query) return matchesCategory;
+
+    const matchesSearch =
+      item.title.toLowerCase().includes(query) ||
+      item.company.toLowerCase().includes(query) ||
+      (item.location && item.location.toLowerCase().includes(query)) ||
+      (Array.isArray(item.tags) && item.tags.some((t) => t.toLowerCase().includes(query))) ||
+      (item.source && item.source.toLowerCase().includes(query));
+
+    return matchesCategory && matchesSearch;
+  });
+
+  const discoveredJobsCount = discoveredOpportunities.filter((o) => o.type === "Job").length;
+  const discoveredInternsCount = discoveredOpportunities.filter((o) => o.type === "Internship").length;
+  const discoveredHacksCount = discoveredOpportunities.filter((o) => o.type === "Hackathon").length;
+  const discoveredScholsCount = discoveredOpportunities.filter((o) => o.type === "Scholarship").length;
+
+  function changeStatus(id, newStatus) {
+    setOpportunities((current) =>
+      current.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              status: newStatus,
+            }
+          : item
+      )
+    );
+  }
+
+  function deleteOpportunity(id) {
+    const confirmed = window.confirm(
+      "Are you sure you want to delete this opportunity?"
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setOpportunities((current) =>
+      current.filter((item) => item.id !== id)
+    );
+  }
+
+  function startEditing(item) {
+    setEditingId(item.id);
+
+    setNewOpportunity({
+      title: item.title,
+      company: item.company,
+      type: item.type,
+      deadline: convertOldDate(item.deadline),
+      url: item.url || "",
+    });
+
+    setShowModal(true);
+  }
+
+  function openAddModal() {
+    setEditingId(null);
+
+    setNewOpportunity({
+      title: "",
+      company: "",
+      type: "Internship",
+      deadline: "",
+      url: "",
+    });
+
+    setShowModal(true);
+  }
+
+  function closeModal() {
+    setShowModal(false);
+    setEditingId(null);
+
+    setNewOpportunity({
+      title: "",
+      company: "",
+      type: "Internship",
+      deadline: "",
+      url: "",
+    });
+  }
+
+  function saveOpportunity(e) {
+    e.preventDefault();
+
+    if (
+      !newOpportunity.title.trim() ||
+      !newOpportunity.company.trim()
+    ) {
+      alert("Please enter opportunity title and company name.");
+      return;
+    }
+
+    if (editingId !== null) {
+      setOpportunities((current) =>
+        current.map((item) =>
+          item.id === editingId
+            ? {
+                ...item,
+                title:
+                  newOpportunity.title.trim(),
+                company:
+                  newOpportunity.company.trim(),
+                type: newOpportunity.type,
+                deadline:
+                  newOpportunity.deadline,
+                url:
+                  newOpportunity.url.trim(),
+                color: getTypeColor(
+                  newOpportunity.type
+                ),
+              }
+            : item
+        )
+      );
+    } else {
+      const newItem = {
+        id: Date.now(),
+        title: newOpportunity.title.trim(),
+        company: newOpportunity.company.trim(),
+        type: newOpportunity.type,
+        deadline: newOpportunity.deadline,
+        url: newOpportunity.url.trim(),
+        status: "Saved",
+        color: getTypeColor(
+          newOpportunity.type
+        ),
+      };
+
+      setOpportunities((current) => [
+        newItem,
+        ...current,
+      ]);
+    }
+
+    closeModal();
+  }
+
+  function scrollToOpportunities() {
+    opportunitiesRef.current?.scrollIntoView({
+      behavior: "smooth",
+    });
+  }
+
+  function scrollToDiscovery() {
+    discoveryRef.current?.scrollIntoView({
+      behavior: "smooth",
+    });
+  }
+
+  function focusSearch() {
+    scrollToOpportunities();
+
+    setTimeout(() => {
+      searchRef.current?.focus();
+    }, 400);
+  }
+
+  function getStatusClass(status) {
+    return status.toLowerCase();
+  }
+
+  return (
+    <div className="app">
+      <style>{`
+        * {
+          box-sizing: border-box;
+        }
+
+        body {
+          margin: 0;
+          font-family: Inter, Arial, sans-serif;
+          background: #f6f8fc;
+          color: #172033;
+        }
+
+        button,
+        input,
+        select {
+          font: inherit;
+        }
+
+        button {
+          cursor: pointer;
+        }
+
+        .app {
+          min-height: 100vh;
+          display: flex;
+        }
+
+        .sidebar {
+          width: 250px;
+          min-height: 100vh;
+          background: #111827;
+          color: white;
+          padding: 28px 18px;
+          position: fixed;
+          left: 0;
+          top: 0;
+          bottom: 0;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          z-index: 50;
+        }
+
+        .logo {
+          font-size: 22px;
+          font-weight: 800;
+          margin-bottom: 40px;
+          padding-left: 10px;
+        }
+
+        .logo span {
+          color: #6366f1;
+        }
+
+        .nav {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .nav button {
+          border: none;
+          background: transparent;
+          color: #cbd5e1;
+          text-align: left;
+          padding: 13px 14px;
+          border-radius: 10px;
+          font-weight: 600;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          transition: background 0.15s, color 0.15s;
+        }
+
+        .nav button:hover,
+        .nav button.active {
+          background: #252d3d;
+          color: white;
+        }
+
+        .nav-badge {
+          font-size: 11px;
+          font-weight: 800;
+          background: #3730a3;
+          color: #e0e7ff;
+          padding: 2px 7px;
+          border-radius: 999px;
+        }
+
+        .main {
+          margin-left: 250px;
+          width: calc(100% - 250px);
+          padding: 32px 40px;
+        }
+
+        .topbar {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 30px;
+        }
+
+        .welcome h1 {
+          margin: 0;
+          font-size: 28px;
+        }
+
+        .welcome p {
+          margin: 7px 0 0;
+          color: #64748b;
+        }
+
+        .topbar-actions {
+          display: flex;
+          gap: 12px;
+        }
+
+        .add-btn {
+          border: none;
+          background: #4f46e5;
+          color: white;
+          padding: 12px 18px;
+          border-radius: 10px;
+          font-weight: 700;
+          transition: background 0.15s;
+        }
+
+        .add-btn:hover {
+          background: #4338ca;
+        }
+
+        .explore-btn {
+          border: 1px solid #c7d2fe;
+          background: #eef2ff;
+          color: #4338ca;
+          padding: 12px 18px;
+          border-radius: 10px;
+          font-weight: 700;
+          transition: all 0.15s;
+        }
+
+        .explore-btn:hover {
+          background: #e0e7ff;
+        }
+
+        .stats {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 18px;
+          margin-bottom: 28px;
+        }
+
+        .stat-card {
+          background: white;
+          border: 1px solid #e5e7eb;
+          border-radius: 15px;
+          padding: 20px;
+        }
+
+        .stat-title {
+          color: #64748b;
+          font-size: 14px;
+          margin-bottom: 10px;
+        }
+
+        .stat-number {
+          font-size: 28px;
+          font-weight: 800;
+        }
+
+        .pipeline {
+          background: white;
+          border: 1px solid #e5e7eb;
+          border-radius: 15px;
+          padding: 20px;
+          margin-bottom: 28px;
+        }
+
+        .section-title {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 18px;
+        }
+
+        .section-title h2 {
+          margin: 0;
+          font-size: 19px;
+        }
+
+        .pipeline-grid {
+          display: grid;
+          grid-template-columns: repeat(5, 1fr);
+          gap: 12px;
+        }
+
+        .pipeline-item {
+          background: #f8fafc;
+          border-radius: 10px;
+          padding: 14px;
+        }
+
+        .pipeline-item span {
+          display: block;
+          color: #64748b;
+          font-size: 13px;
+          margin-bottom: 6px;
+        }
+
+        .pipeline-item strong {
+          font-size: 22px;
+        }
+
+        .deadline-summary {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 12px;
+          margin-bottom: 28px;
+        }
+
+        .deadline-card {
+          background: white;
+          border: 1px solid #e5e7eb;
+          border-radius: 15px;
+          padding: 18px;
+        }
+
+        .deadline-card-title {
+          font-size: 13px;
+          color: #64748b;
+          margin-bottom: 6px;
+        }
+
+        .deadline-card-number {
+          font-size: 24px;
+          font-weight: 800;
+        }
+
+        .deadline-card.overdue-card {
+          border-left: 4px solid #dc2626;
+        }
+
+        .deadline-card.soon-card {
+          border-left: 4px solid #f59e0b;
+        }
+
+        /* DISCOVERY SECTION STYLES */
+        .discovery-box {
+          background: white;
+          border: 1px solid #e5e7eb;
+          border-radius: 18px;
+          padding: 24px;
+          margin-bottom: 32px;
+          box-shadow: 0 4px 12px rgba(15, 23, 42, 0.03);
+        }
+
+        .discovery-top {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 16px;
+          margin-bottom: 16px;
+        }
+
+        .discovery-header h2 {
+          margin: 0 0 6px;
+          font-size: 20px;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+
+        .discovery-header p {
+          margin: 0;
+          color: #64748b;
+          font-size: 14px;
+        }
+
+        .live-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 11px;
+          font-weight: 800;
+          padding: 4px 10px;
+          border-radius: 999px;
+          background: #ecfdf5;
+          color: #047857;
+          border: 1px solid #a7f3d0;
+        }
+
+        .pulse-dot {
+          width: 7px;
+          height: 7px;
+          border-radius: 50%;
+          background: #10b981;
+          display: inline-block;
+          animation: pulseAnim 2s infinite;
+        }
+
+        @keyframes pulseAnim {
+          0% { transform: scale(0.95); opacity: 0.8; }
+          50% { transform: scale(1.3); opacity: 1; }
+          100% { transform: scale(0.95); opacity: 0.8; }
+        }
+
+        .refresh-btn {
+          border: 1px solid #dbe1ea;
+          background: white;
+          color: #334155;
+          padding: 9px 15px;
+          border-radius: 9px;
+          font-weight: 700;
+          font-size: 13px;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          transition: all 0.15s;
+        }
+
+        .refresh-btn:hover {
+          background: #f8fafc;
+          border-color: #cbd5e1;
+        }
+
+        .sources-status-bar {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 8px;
+          padding: 10px 14px;
+          background: #f8fafc;
+          border: 1px solid #eef2f6;
+          border-radius: 10px;
+          margin-bottom: 18px;
+          font-size: 12px;
+        }
+
+        .sources-status-label {
+          font-weight: 700;
+          color: #475569;
+          margin-right: 4px;
+        }
+
+        .source-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          padding: 3px 8px;
+          border-radius: 6px;
+          background: white;
+          border: 1px solid #e2e8f0;
+          font-size: 11px;
+          font-weight: 600;
+          color: #334155;
+        }
+
+        .source-pill.online::before {
+          content: "";
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: #10b981;
+        }
+
+        .source-pill.unavailable {
+          background: #fffbeb;
+          border-color: #fde68a;
+          color: #b45309;
+        }
+
+        .source-pill.unavailable::before {
+          content: "";
+          width: 6px;
+          height: 6px;
+          border-radius: 50%;
+          background: #f59e0b;
+        }
+
+        .warning-banner {
+          background: #fffbeb;
+          border: 1px solid #fde68a;
+          color: #92400e;
+          padding: 10px 14px;
+          border-radius: 9px;
+          margin-bottom: 16px;
+          font-size: 13px;
+        }
+
+        .discovery-controls {
+          display: flex;
+          flex-wrap: wrap;
+          justify-content: space-between;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 18px;
+        }
+
+        .category-pills {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+
+        .cat-pill {
+          border: 1px solid #e2e8f0;
+          background: #f8fafc;
+          color: #475569;
+          padding: 8px 14px;
+          border-radius: 9px;
+          font-size: 13px;
+          font-weight: 700;
+          transition: all 0.15s;
+        }
+
+        .cat-pill:hover {
+          background: #f1f5f9;
+        }
+
+        .cat-pill.active {
+          background: #4f46e5;
+          color: white;
+          border-color: #4f46e5;
+        }
+
+        .discovery-search {
+          min-width: 260px;
+          flex: 1;
+          max-width: 360px;
+          padding: 10px 14px;
+          border: 1px solid #dbe1ea;
+          border-radius: 9px;
+          outline: none;
+          background: white;
+        }
+
+        .discovery-search:focus {
+          border-color: #6366f1;
+        }
+
+        .discovery-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+          gap: 16px;
+        }
+
+        .discovery-card {
+          background: white;
+          border: 1px solid #e5e7eb;
+          border-radius: 14px;
+          padding: 18px;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          gap: 14px;
+          transition: all 0.15s ease-in-out;
+        }
+
+        .discovery-card:hover {
+          border-color: #cbd5e1;
+          box-shadow: 0 6px 20px rgba(0, 0, 0, 0.05);
+          transform: translateY(-2px);
+        }
+
+        .discovery-card-top {
+          display: flex;
+          align-items: flex-start;
+          gap: 12px;
+        }
+
+        .card-icon {
+          width: 42px;
+          height: 42px;
+          border-radius: 10px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          font-weight: 800;
+          font-size: 16px;
+          flex-shrink: 0;
+        }
+
+        .card-header-info {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .card-title {
+          font-size: 15px;
+          font-weight: 700;
+          margin: 0 0 5px;
+          line-height: 1.35;
+        }
+
+        .card-title a {
+          color: #111827;
+          text-decoration: none;
+          display: inline;
+        }
+
+        .card-title a:hover {
+          color: #4f46e5;
+          text-decoration: underline;
+        }
+
+        .card-company {
+          font-size: 13px;
+          color: #64748b;
+          font-weight: 600;
+          margin-bottom: 6px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .card-meta-row {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 6px;
+          font-size: 11px;
+        }
+
+        .card-badge {
+          padding: 3px 7px;
+          border-radius: 6px;
+          font-weight: 700;
+        }
+
+        .location-badge {
+          background: #f1f5f9;
+          color: #475569;
+        }
+
+        .source-badge {
+          background: #eef2ff;
+          color: #4338ca;
+        }
+
+        .card-deadline {
+          font-size: 12px;
+          color: #64748b;
+          margin-top: 8px;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          flex-wrap: wrap;
+        }
+
+        .discovery-card-footer {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 10px;
+          padding-top: 12px;
+          border-top: 1px solid #f1f5f9;
+        }
+
+        .view-link {
+          font-size: 12px;
+          font-weight: 700;
+          color: #4f46e5;
+          text-decoration: none;
+          display: inline-flex;
+          align-items: center;
+          gap: 3px;
+        }
+
+        .view-link:hover {
+          text-decoration: underline;
+        }
+
+        .save-to-tracker-btn {
+          border: none;
+          background: #4f46e5;
+          color: white;
+          padding: 8px 14px;
+          border-radius: 8px;
+          font-size: 12px;
+          font-weight: 700;
+          transition: background 0.15s;
+        }
+
+        .save-to-tracker-btn:hover {
+          background: #4338ca;
+        }
+
+        .tracked-indicator {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          background: #ecfdf5;
+          color: #059669;
+          border: 1px solid #a7f3d0;
+          padding: 6px 10px;
+          border-radius: 8px;
+          font-size: 12px;
+          font-weight: 700;
+        }
+
+        .skeleton-card {
+          background: white;
+          border: 1px solid #e5e7eb;
+          border-radius: 14px;
+          padding: 18px;
+          height: 160px;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+        }
+
+        .skeleton-line {
+          height: 14px;
+          background: #f1f5f9;
+          border-radius: 6px;
+          animation: pulseSkeleton 1.5s infinite;
+        }
+
+        @keyframes pulseSkeleton {
+          0% { opacity: 0.6; }
+          50% { opacity: 1; }
+          100% { opacity: 0.6; }
+        }
+
+        .toast-banner {
+          position: fixed;
+          bottom: 24px;
+          right: 24px;
+          background: #111827;
+          color: white;
+          padding: 14px 20px;
+          border-radius: 12px;
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+          font-size: 14px;
+          font-weight: 600;
+          z-index: 1000;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          animation: slideUpToast 0.25s ease-out;
+        }
+
+        @keyframes slideUpToast {
+          from { transform: translateY(20px); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
+        }
+
+        /* EXISTING TRACKER STYLES */
+        .toolbar {
+          display: flex;
+          gap: 12px;
+          margin-bottom: 18px;
+        }
+
+        .search {
+          flex: 1;
+          padding: 13px 15px;
+          border: 1px solid #dbe1ea;
+          border-radius: 10px;
+          outline: none;
+          background: white;
+        }
+
+        .search:focus {
+          border-color: #6366f1;
+        }
+
+        .filter {
+          padding: 13px;
+          border: 1px solid #dbe1ea;
+          border-radius: 10px;
+          background: white;
+        }
+
+        .list {
+          display: grid;
+          gap: 14px;
+        }
+
+        .opportunity {
+          background: white;
+          border: 1px solid #e5e7eb;
+          border-radius: 15px;
+          padding: 20px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 20px;
+        }
+
+        .opportunity-left {
+          display: flex;
+          align-items: center;
+          gap: 15px;
+        }
+
+        .company-icon {
+          width: 46px;
+          height: 46px;
+          border-radius: 12px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          font-weight: 800;
+          flex-shrink: 0;
+        }
+
+        .opportunity h3 {
+          margin: 0 0 6px;
+          font-size: 16px;
+        }
+
+        .company {
+          color: #64748b;
+          font-size: 14px;
+          margin-bottom: 6px;
+        }
+
+        .deadline {
+          color: #64748b;
+          font-size: 13px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+
+        .deadline-status {
+          display: inline-flex;
+          padding: 4px 8px;
+          border-radius: 999px;
+          font-size: 11px;
+          font-weight: 800;
+        }
+
+        .deadline-status.overdue {
+          background: #fee2e2;
+          color: #b91c1c;
+        }
+
+        .deadline-status.due-today {
+          background: #fef3c7;
+          color: #b45309;
+        }
+
+        .deadline-status.due-soon {
+          background: #ffedd5;
+          color: #c2410c;
+        }
+
+        .deadline-status.upcoming {
+          background: #dcfce7;
+          color: #15803d;
+        }
+
+        .deadline-status.no-deadline {
+          background: #f1f5f9;
+          color: #64748b;
+        }
+
+        .opportunity-right {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+
+        .type {
+          background: #f1f5f9;
+          color: #475569;
+          padding: 7px 10px;
+          border-radius: 8px;
+          font-size: 12px;
+          font-weight: 700;
+        }
+
+        .status-select {
+          border: 1px solid #dbe1ea;
+          border-radius: 8px;
+          padding: 8px 10px;
+          font-weight: 700;
+          outline: none;
+          background: white;
+        }
+
+        .status-select.saved {
+          color: #64748b;
+        }
+
+        .status-select.interested {
+          color: #d97706;
+        }
+
+        .status-select.applied {
+          color: #2563eb;
+        }
+
+        .status-select.interview {
+          color: #7c3aed;
+        }
+
+        .status-select.selected {
+          color: #059669;
+        }
+
+        .edit-btn,
+        .delete-btn {
+          width: 36px;
+          height: 36px;
+          border-radius: 8px;
+          background: white;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 16px;
+        }
+
+        .edit-btn {
+          border: 1px solid #c7d2fe;
+        }
+
+        .edit-btn:hover {
+          background: #eef2ff;
+        }
+
+        .delete-btn {
+          border: 1px solid #fecaca;
+        }
+
+        .delete-btn:hover {
+          background: #fee2e2;
+        }
+
+        .empty {
+          background: white;
+          border: 1px dashed #cbd5e1;
+          padding: 40px;
+          text-align: center;
+          border-radius: 15px;
+          color: #64748b;
+        }
+
+        .modal-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(15, 23, 42, 0.55);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 20px;
+          z-index: 100;
+        }
+
+        .modal {
+          width: 100%;
+          max-width: 480px;
+          background: white;
+          border-radius: 18px;
+          padding: 25px;
+          box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2);
+        }
+
+        .modal h2 {
+          margin-top: 0;
+          margin-bottom: 20px;
+        }
+
+        .form-group {
+          margin-bottom: 15px;
+        }
+
+        .form-group label {
+          display: block;
+          font-size: 13px;
+          font-weight: 700;
+          margin-bottom: 7px;
+        }
+
+        .form-group input,
+        .form-group select {
+          width: 100%;
+          padding: 12px;
+          border: 1px solid #dbe1ea;
+          border-radius: 9px;
+          outline: none;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+          border-color: #6366f1;
+        }
+
+        .form-actions {
+          display: flex;
+          justify-content: flex-end;
+          gap: 10px;
+          margin-top: 20px;
+        }
+
+        .cancel-btn {
+          border: 1px solid #dbe1ea;
+          background: white;
+          padding: 11px 16px;
+          border-radius: 9px;
+        }
+
+        .cancel-btn:hover {
+          background: #f8fafc;
+        }
+
+        .submit-btn {
+          border: none;
+          background: #4f46e5;
+          color: white;
+          padding: 11px 16px;
+          border-radius: 9px;
+          font-weight: 700;
+        }
+
+        .submit-btn:hover {
+          background: #4338ca;
+        }
+
+        @media (max-width: 900px) {
+          .sidebar {
+            width: 210px;
+          }
+
+          .main {
+            margin-left: 210px;
+            width: calc(100% - 210px);
+            padding: 25px;
+          }
+
+          .stats {
+            grid-template-columns: repeat(2, 1fr);
+          }
+
+          .pipeline-grid {
+            grid-template-columns: repeat(2, 1fr);
+          }
+        }
+
+        @media (max-width: 650px) {
+          .sidebar {
+            display: none;
+          }
+
+          .main {
+            margin-left: 0;
+            width: 100%;
+            padding: 20px;
+          }
+
+          .topbar {
+            align-items: flex-start;
+            gap: 15px;
+            flex-direction: column;
+          }
+
+          .stats {
+            grid-template-columns: 1fr 1fr;
+          }
+
+          .deadline-summary {
+            grid-template-columns: 1fr;
+          }
+
+          .opportunity {
+            align-items: flex-start;
+            flex-direction: column;
+          }
+
+          .opportunity-right {
+            width: 100%;
+            justify-content: flex-start;
+            flex-wrap: wrap;
+          }
+
+          .toolbar {
+            flex-direction: column;
+          }
+
+          .discovery-controls {
+            flex-direction: column;
+            align-items: stretch;
+          }
+
+          .discovery-search {
+            max-width: 100%;
+          }
+        }
+      `}</style>
+
+      {/* SIDEBAR */}
+      <aside className="sidebar">
+        <div>
+          <div className="logo">
+            Opportunity<span>Hub</span>
+          </div>
+
+          <nav className="nav">
+            <button
+              className="active"
+              onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+            >
+              <span>Dashboard</span>
+            </button>
+
+            <button onClick={scrollToDiscovery}>
+              <span>Discover Live</span>
+              <span className="nav-badge">
+                {discoveredOpportunities.length > 0 ? discoveredOpportunities.length : "Live"}
+              </span>
+            </button>
+
+            <button onClick={scrollToOpportunities}>
+              <span>My Tracker</span>
+              <span className="nav-badge">{totalOpportunities}</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setFilter("Saved");
+                scrollToOpportunities();
+              }}
+            >
+              <span>Saved</span>
+              <span className="nav-badge">{savedCount}</span>
+            </button>
+
+            <button onClick={focusSearch}>
+              <span>Search</span>
+            </button>
+          </nav>
+        </div>
+      </aside>
+
+      {/* MAIN CONTENT */}
+      <main className="main">
+        <div className="topbar">
+          <div className="welcome">
+            <h1>Good morning 👋</h1>
+            <p>Discover fresh student opportunities & track applications in one place.</p>
+          </div>
+
+          <div className="topbar-actions">
+            <button className="explore-btn" onClick={scrollToDiscovery}>
+              🌐 Discover Live ({discoveredOpportunities.length})
+            </button>
+            <button className="add-btn" onClick={openAddModal}>
+              + Add Opportunity
+            </button>
+          </div>
+        </div>
+
+        {/* AI ASSISTANT */}
+        <AIAssistant opportunities={opportunities} />
+
+        {/* METRICS & STATS */}
+        <section className="stats">
+          <div className="stat-card">
+            <div className="stat-title">Total Opportunities</div>
+            <div className="stat-number">{totalOpportunities}</div>
+          </div>
+
+          <div className="stat-card">
+            <div className="stat-title">Applied</div>
+            <div className="stat-number">{appliedCount}</div>
+          </div>
+
+          <div className="stat-card">
+            <div className="stat-title">Interested</div>
+            <div className="stat-number">{interestedCount}</div>
+          </div>
+
+          <div className="stat-card">
+            <div className="stat-title">Saved</div>
+            <div className="stat-number">{savedCount}</div>
+          </div>
+        </section>
+
+        {/* APPLICATION PIPELINE */}
+        <section className="pipeline">
+          <div className="section-title">
+            <h2>Application Pipeline</h2>
+          </div>
+
+          <div className="pipeline-grid">
+            <div className="pipeline-item">
+              <span>Saved</span>
+              <strong>{savedCount}</strong>
+            </div>
+
+            <div className="pipeline-item">
+              <span>Interested</span>
+              <strong>{interestedCount}</strong>
+            </div>
+
+            <div className="pipeline-item">
+              <span>Applied</span>
+              <strong>{appliedCount}</strong>
+            </div>
+
+            <div className="pipeline-item">
+              <span>Interview</span>
+              <strong>{interviewCount}</strong>
+            </div>
+
+            <div className="pipeline-item">
+              <span>Selected</span>
+              <strong>{selectedCount}</strong>
+            </div>
+          </div>
+        </section>
+
+        {/* DEADLINE SUMMARY */}
+        <section className="deadline-summary">
+          <div className="deadline-card overdue-card">
+            <div className="deadline-card-title">Overdue</div>
+            <div className="deadline-card-number">{overdueCount}</div>
+          </div>
+
+          <div className="deadline-card soon-card">
+            <div className="deadline-card-title">Due Soon</div>
+            <div className="deadline-card-number">{dueSoonCount}</div>
+          </div>
+        </section>
+
+        {/* LIVE OPPORTUNITY DISCOVERY SECTION */}
+        <section ref={discoveryRef} className="discovery-box">
+          <div className="discovery-top">
+            <div className="discovery-header">
+              <h2>
+                🌐 Discover Live Opportunities
+                <span className="live-badge">
+                  <span className="pulse-dot"></span>
+                  Real-time Web Feed
+                </span>
+              </h2>
+              <p>
+                Browse verified live jobs, internships, hackathons, and scholarships from the internet.
+              </p>
+            </div>
+
+            <button
+              className="refresh-btn"
+              onClick={() => fetchDiscoveredOpportunities(discoveryCategory)}
+              disabled={discoveryLoading}
+              title="Refresh live feeds"
+            >
+              🔄 {discoveryLoading ? "Fetching..." : "Refresh"}
+            </button>
+          </div>
+
+          {/* Source health status */}
+          <div className="sources-status-bar">
+            <span className="sources-status-label">Live Sources:</span>
+            {sourcesInfo.length > 0 ? (
+              sourcesInfo.map((s) => (
+                <span
+                  key={s.name}
+                  className={`source-pill ${s.status === "online" ? "online" : "unavailable"}`}
+                  title={s.status === "online" ? `${s.count} opportunities found` : s.error}
+                >
+                  {s.name} ({s.status === "online" ? s.count : "Offline"})
+                </span>
+              ))
+            ) : (
+              <span className="source-pill online">Checking external sources...</span>
+            )}
+          </div>
+
+          {/* Unavailable sources alert */}
+          {unavailableSources.length > 0 && (
+            <div className="warning-banner" role="alert">
+              ⚠️ <strong>Note:</strong> Some external sources (
+              {unavailableSources.map((u) => u.name).join(", ")}) could not be reached. Showing
+              results from all available active providers.
+            </div>
+          )}
+
+          {/* Discovery Filter Controls */}
+          <div className="discovery-controls">
+            <div className="category-pills">
+              <button
+                className={`cat-pill ${discoveryCategory === "All" ? "active" : ""}`}
+                onClick={() => setDiscoveryCategory("All")}
+              >
+                All ({discoveredOpportunities.length})
+              </button>
+
+              <button
+                className={`cat-pill ${discoveryCategory === "Job" ? "active" : ""}`}
+                onClick={() => setDiscoveryCategory("Job")}
+              >
+                💼 Jobs ({discoveredJobsCount})
+              </button>
+
+              <button
+                className={`cat-pill ${discoveryCategory === "Internship" ? "active" : ""}`}
+                onClick={() => setDiscoveryCategory("Internship")}
+              >
+                🎓 Internships ({discoveredInternsCount})
+              </button>
+
+              <button
+                className={`cat-pill ${discoveryCategory === "Hackathon" ? "active" : ""}`}
+                onClick={() => setDiscoveryCategory("Hackathon")}
+              >
+                ⚡ Hackathons ({discoveredHacksCount})
+              </button>
+
+              <button
+                className={`cat-pill ${discoveryCategory === "Scholarship" ? "active" : ""}`}
+                onClick={() => setDiscoveryCategory("Scholarship")}
+              >
+                🏆 Scholarships ({discoveredScholsCount})
+              </button>
+            </div>
+
+            <input
+              className="discovery-search"
+              placeholder="Search live titles, companies, locations..."
+              value={discoverySearch}
+              onChange={(e) => setDiscoverySearch(e.target.value)}
+            />
+          </div>
+
+          {/* Loading State */}
+          {discoveryLoading && (
+            <div className="discovery-grid">
+              {[1, 2, 3, 4, 5, 6].map((idx) => (
+                <div key={idx} className="skeleton-card">
+                  <div style={{ display: "flex", gap: "10px" }}>
+                    <div style={{ width: "42px", height: "42px", borderRadius: "10px", background: "#f1f5f9" }} />
+                    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "8px" }}>
+                      <div className="skeleton-line" style={{ width: "80%" }} />
+                      <div className="skeleton-line" style={{ width: "50%" }} />
+                    </div>
+                  </div>
+                  <div className="skeleton-line" style={{ width: "40%" }} />
+                  <div className="skeleton-line" style={{ width: "100%" }} />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Error State */}
+          {!discoveryLoading && discoveryError && (
+            <div className="empty" style={{ borderColor: "#fecaca", background: "#fef2f2", color: "#991b1b" }}>
+              <div style={{ fontSize: "24px", marginBottom: "8px" }}>⚠️</div>
+              <strong style={{ display: "block", marginBottom: "6px" }}>Could not fetch live opportunities</strong>
+              <p style={{ margin: "0 0 16px" }}>{discoveryError}</p>
+              <button
+                className="add-btn"
+                onClick={() => fetchDiscoveredOpportunities(discoveryCategory)}
+              >
+                Try Again
+              </button>
+            </div>
+          )}
+
+          {/* Empty State */}
+          {!discoveryLoading && !discoveryError && filteredDiscovered.length === 0 && (
+            <div className="empty">
+              <div style={{ fontSize: "24px", marginBottom: "8px" }}>🔍</div>
+              <strong>No opportunities found</strong>
+              <p style={{ margin: "4px 0 0" }}>
+                {discoverySearch
+                  ? `No listings match "${discoverySearch}". Try a different keyword.`
+                  : "No opportunities available for this category right now."}
+              </p>
+            </div>
+          )}
+
+          {/* Discovered Opportunities Grid */}
+          {!discoveryLoading && !discoveryError && filteredDiscovered.length > 0 && (
+            <div className="discovery-grid">
+              {filteredDiscovered.slice(0, 48).map((item) => {
+                const tracked = isTracked(item);
+                const trackedItem = tracked ? getTrackedItem(item) : null;
+                const deadlineInfo = item.deadline ? getDeadlineInfo(item.deadline) : null;
+
+                return (
+                  <div key={item.id} className="discovery-card">
+                    <div>
+                      <div className="discovery-card-top">
+                        <div
+                          className="card-icon"
+                          style={{
+                            background: getTypeColor(item.type),
+                          }}
+                        >
+                          {item.company.charAt(0).toUpperCase()}
+                        </div>
+
+                        <div className="card-header-info">
+                          <h4 className="card-title">
+                            <a
+                              href={item.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="Open verified listing in new tab"
+                            >
+                              {item.title} ↗
+                            </a>
+                          </h4>
+
+                          <div className="card-company">{item.company}</div>
+
+                          <div className="card-meta-row">
+                            <span
+                              className="card-badge"
+                              style={{
+                                background: "#f1f5f9",
+                                color: getTypeColor(item.type),
+                              }}
+                            >
+                              {item.type}
+                            </span>
+
+                            {item.location && (
+                              <span className="card-badge location-badge">
+                                📍 {item.location}
+                              </span>
+                            )}
+
+                            {item.source && (
+                              <span className="card-badge source-badge">
+                                {item.source}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Deadline or Status Display */}
+                      <div className="card-deadline">
+                        {item.deadline ? (
+                          <>
+                            <span>Deadline: {formatDate(item.deadline)}</span>
+                            {deadlineInfo && (
+                              <span className={`deadline-status ${deadlineInfo.className}`}>
+                                {deadlineInfo.label}
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          <span>Status: {item.deadlineLabel || "Ongoing / Open"}</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="discovery-card-footer">
+                      <a
+                        href={item.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="view-link"
+                      >
+                        View Official Listing ↗
+                      </a>
+
+                      {tracked ? (
+                        <div className="tracked-indicator">
+                          <span>✓ Tracked</span>
+                          {trackedItem && (
+                            <select
+                              className={`status-select ${getStatusClass(trackedItem.status)}`}
+                              style={{ padding: "4px 8px", fontSize: "11px", height: "auto" }}
+                              value={trackedItem.status}
+                              onChange={(e) => changeStatus(trackedItem.id, e.target.value)}
+                            >
+                              {statuses.map((s) => (
+                                <option key={s} value={s}>
+                                  {s}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
+                      ) : (
+                        <button
+                          className="save-to-tracker-btn"
+                          onClick={() => saveToTracker(item)}
+                        >
+                          + Save to Tracker
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        {/* MY TRACKED OPPORTUNITIES */}
+        <section ref={opportunitiesRef}>
+          <div className="section-title">
+            <h2>My Opportunities Tracker</h2>
+          </div>
+
+          <div className="toolbar">
+            <input
+              ref={searchRef}
+              className="search"
+              placeholder="Search opportunities or companies..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+
+            <select
+              className="filter"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            >
+              <option value="All">All Statuses</option>
+              {statuses.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="list">
+            {filteredOpportunities.length === 0 ? (
+              <div className="empty">
+                No opportunities found in your tracker. Try searching for something else or discover fresh opportunities above!
+              </div>
+            ) : (
+              filteredOpportunities.map((item) => {
+                const deadlineInfo = getDeadlineInfo(item.deadline);
+
+                return (
+                  <div className="opportunity" key={item.id}>
+                    <div className="opportunity-left">
+                      <div
+                        className="company-icon"
+                        style={{
+                          background: item.color || getTypeColor(item.type),
+                        }}
+                      >
+                        {item.company.charAt(0).toUpperCase()}
+                      </div>
+
+                      <div>
+                        <h3>
+                          {item.url ? (
+                            <a
+                              href={item.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{ color: "inherit", textDecoration: "none" }}
+                              title="Open original listing"
+                            >
+                              {item.title} <span style={{ fontSize: "13px", color: "#6366f1" }}>↗</span>
+                            </a>
+                          ) : (
+                            item.title
+                          )}
+                        </h3>
+
+                        <div className="company">
+                          {item.company}
+                          {item.location && (
+                            <span style={{ marginLeft: "8px", color: "#64748b", fontSize: "12px" }}>
+                              • 📍 {item.location}
+                            </span>
+                          )}
+                          {item.source && (
+                            <span style={{ marginLeft: "8px", background: "#f1f5f9", padding: "2px 6px", borderRadius: "4px", fontSize: "11px" }}>
+                              {item.source}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="deadline">
+                          <span>
+                            Deadline: {formatDate(item.deadline)}
+                          </span>
+
+                          <span className={`deadline-status ${deadlineInfo.className}`}>
+                            {deadlineInfo.label}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="opportunity-right">
+                      <span className="type">{item.type}</span>
+
+                      <select
+                        className={`status-select ${getStatusClass(item.status)}`}
+                        value={item.status}
+                        onChange={(e) => changeStatus(item.id, e.target.value)}
+                      >
+                        {statuses.map((status) => (
+                          <option key={status} value={status}>
+                            {status}
+                          </option>
+                        ))}
+                      </select>
+
+                      <button
+                        className="edit-btn"
+                        onClick={() => startEditing(item)}
+                        title="Edit opportunity"
+                      >
+                        ✏️
+                      </button>
+
+                      <button
+                        className="delete-btn"
+                        onClick={() => deleteOpportunity(item.id)}
+                        title="Delete opportunity"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </section>
+      </main>
+
+      {/* TOAST FEEDBACK NOTIFICATION */}
+      {toastMessage && (
+        <div className="toast-banner">
+          <span>✓</span>
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {/* ADD / EDIT MODAL */}
+      {showModal && (
+        <div className="modal-overlay" onClick={closeModal}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>
+              {editingId !== null ? "Edit Opportunity" : "Add Opportunity"}
+            </h2>
+
+            <form onSubmit={saveOpportunity}>
+              <div className="form-group">
+                <label>Opportunity Title *</label>
+                <input
+                  type="text"
+                  placeholder="e.g. AI Product Design Internship"
+                  value={newOpportunity.title}
+                  onChange={(e) =>
+                    setNewOpportunity({
+                      ...newOpportunity,
+                      title: e.target.value,
+                    })
+                  }
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Company / Organization *</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Microsoft"
+                  value={newOpportunity.company}
+                  onChange={(e) =>
+                    setNewOpportunity({
+                      ...newOpportunity,
+                      company: e.target.value,
+                    })
+                  }
+                  required
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Type</label>
+                <select
+                  value={newOpportunity.type}
+                  onChange={(e) =>
+                    setNewOpportunity({
+                      ...newOpportunity,
+                      type: e.target.value,
+                    })
+                  }
+                >
+                  <option>Internship</option>
+                  <option>Hackathon</option>
+                  <option>Job</option>
+                  <option>Scholarship</option>
+                  <option>Competition</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label>Application Deadline (optional)</label>
+                <input
+                  type="date"
+                  value={newOpportunity.deadline}
+                  onChange={(e) =>
+                    setNewOpportunity({
+                      ...newOpportunity,
+                      deadline: e.target.value,
+                    })
+                  }
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Opportunity URL / Source Link (optional)</label>
+                <input
+                  type="url"
+                  placeholder="https://..."
+                  value={newOpportunity.url || ""}
+                  onChange={(e) =>
+                    setNewOpportunity({
+                      ...newOpportunity,
+                      url: e.target.value,
+                    })
+                  }
+                />
+              </div>
+
+              <div className="form-actions">
+                <button
+                  type="button"
+                  className="cancel-btn"
+                  onClick={closeModal}
+                >
+                  Cancel
+                </button>
+
+                <button type="submit" className="submit-btn">
+                  {editingId !== null ? "Save Changes" : "Add Opportunity"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function convertOldDate(dateString) {
+  if (!dateString) return "";
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
+    return dateString;
+  }
+
+  const parsed = new Date(dateString);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+export default App;
