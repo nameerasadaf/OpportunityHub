@@ -109,3 +109,16 @@ OpportunityHub aims to make career opportunity discovery and application trackin
 ---
 
 Built with ❤️ to help students discover more opportunities and take the next step in their careers.
+
+
+## 🌐 Live Demo
+
+[Open OpportunityHub](https://opportunityhub-orcin.vercel.app/)
+
+
+## 🔌 API Integrations
+
+- **Live Opportunities API** — Fetches opportunity data through the deployed API endpoint.
+- **Gemini AI Assistant** — Provides AI-powered assistance through the configured Gemini integration.
+
+The live API endpoints have been tested by the developer. Availability and returned data may depend on external services and configuration.
